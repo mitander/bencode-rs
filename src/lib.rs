@@ -1,6 +1,8 @@
 use std::num::ParseIntError;
 use std::{collections::HashMap, fmt::Debug};
 
+use nom::combinator::eof;
+use nom::multi::many0;
 use nom::{
     branch::alt,
     bytes::complete::take,
@@ -9,7 +11,7 @@ use nom::{
     error::{ErrorKind, ParseError},
     multi::many_till,
     sequence::{delimited, pair, preceded},
-    IResult,
+    Err, IResult,
 };
 
 #[derive(Debug)]
@@ -131,6 +133,18 @@ impl<'a> Value<'a> {
         });
         Ok((next, Value::Dictionary(data.collect())))
     }
+
+    pub fn bencode_parse(input: &[u8]) -> Result<Vec<Value>, Err<BencodeError<&[u8]>>> {
+        let (next, result) = many0(alt((
+            Value::parse_bytes,
+            Value::parse_integer,
+            Value::parse_list,
+            Value::parse_dict,
+        )))(input)?;
+
+        let _ = eof(next)?;
+        Ok(result)
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -248,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_list() {
+    fn parse_list() {
         let (_, v) = Value::parse_list(b"l4:spami42eli9ei50eed3:bar4:spameee").unwrap();
         assert_matches!(v, Value::List(_));
 
@@ -289,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_list_errors() {
+    fn parse_list_errors() {
         let v = Value::parse_list(b"123").unwrap_err();
         assert_matches!(v, nom::Err::Error(BencodeError::Nom(..)));
 
@@ -297,6 +311,38 @@ mod tests {
         assert_matches!(v, nom::Err::Error(BencodeError::Nom(..)));
 
         let v = Value::parse_list(b"li1e").unwrap_err();
+        assert_matches!(v, nom::Err::Error(BencodeError::Nom(..)));
+    }
+
+    #[test]
+    fn bencode_parse() {
+        let v = Value::bencode_parse(b"d3:foo3:bar5:hello5:worlde").unwrap();
+        let v = v.first().unwrap();
+        assert_matches!(v, Value::Dictionary(_));
+
+        if let Value::Dictionary(dict) = v {
+            let v = dict.get(b"foo".as_slice()).unwrap();
+            assert_matches!(*v, Value::Bytes(b"bar"));
+
+            let v = dict.get(b"hello".as_slice()).unwrap();
+            assert_matches!(*v, Value::Bytes(b"world"));
+        }
+
+        let (_, v) = Value::parse_dict(b"d4:spaml1:a1:bee").unwrap();
+        assert_matches!(v, Value::Dictionary(_));
+
+        if let Value::Dictionary(dict) = v {
+            let v = dict.get(b"spam".as_slice()).unwrap();
+            assert_matches!(*v, Value::List(_));
+        }
+    }
+
+    #[test]
+    fn bencode_parse_errors() {
+        let v = Value::bencode_parse(b"123").unwrap_err();
+        assert_matches!(v, nom::Err::Error(BencodeError::Nom(..)));
+
+        let v = Value::bencode_parse(b"d3:foo3:bar5:hello5:world").unwrap_err();
         assert_matches!(v, nom::Err::Error(BencodeError::Nom(..)));
     }
 }
