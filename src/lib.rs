@@ -1,15 +1,13 @@
 use std::num::ParseIntError;
 use std::{collections::HashMap, fmt::Debug};
 
-use nom::combinator::eof;
-use nom::multi::many0;
 use nom::{
     branch::alt,
     bytes::complete::take,
     character::complete::{char, digit1},
-    combinator::recognize,
+    combinator::{eof, recognize},
     error::{ErrorKind, ParseError},
-    multi::many_till,
+    multi::{many0, many_till},
     sequence::{delimited, pair, preceded},
     Err, IResult,
 };
@@ -78,8 +76,8 @@ impl<'a> Value<'a> {
         let (input, length) = digit1(input)?;
         let (input, _) = char(':')(input)?;
 
-        let length = std::str::from_utf8(length).expect("value should be a valid integer string");
-        let length: u64 = length
+        let length: u64 = std::str::from_utf8(length)
+            .expect("value should be a valid integer string")
             .parse()
             .map_err(|e| BencodeError::ParseIntError(input, e))?;
 
@@ -146,6 +144,7 @@ impl<'a> Value<'a> {
         Ok(result)
     }
 }
+
 #[cfg(test)]
 mod tests {
     use crate::{BencodeError, Value};
@@ -347,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_torrent() {
+    fn parse_torrent() {
         let data = Value::parse(include_bytes!("../test-assets/test.torrent")).unwrap();
         assert_eq!(data.len(), 1);
 
@@ -366,7 +365,6 @@ mod tests {
 
             let announce = dict.get(b"announce".as_slice()).unwrap();
             assert_matches!(*announce, Value::Bytes(_));
-
             if let Value::Bytes(announce) = *announce {
                 let str = std::str::from_utf8(announce).unwrap();
                 assert_eq!(str, "http://bttracker.debian.org:6969/announce");
@@ -374,7 +372,6 @@ mod tests {
 
             let created_by = dict.get(b"created by".as_slice()).unwrap();
             assert_matches!(created_by, Value::Bytes(_));
-
             if let Value::Bytes(created_by) = *created_by {
                 let str = std::str::from_utf8(created_by).unwrap();
                 assert_eq!(str, "mktorrent 1.1");
