@@ -134,7 +134,7 @@ impl<'a> Value<'a> {
         Ok((next, Value::Dictionary(data.collect())))
     }
 
-    pub fn bencode_parse(input: &[u8]) -> Result<Vec<Value>, Err<BencodeError<&[u8]>>> {
+    pub fn parse(input: &[u8]) -> Result<Vec<Value>, Err<BencodeError<&[u8]>>> {
         let (next, result) = many0(alt((
             Value::parse_bytes,
             Value::parse_integer,
@@ -315,8 +315,8 @@ mod tests {
     }
 
     #[test]
-    fn bencode_parse() {
-        let v = Value::bencode_parse(b"d3:foo3:bar5:hello5:worlde").unwrap();
+    fn parse() {
+        let v = Value::parse(b"d3:foo3:bar5:hello5:worlde").unwrap();
         let v = v.first().unwrap();
         assert_matches!(v, Value::Dictionary(_));
 
@@ -338,11 +338,47 @@ mod tests {
     }
 
     #[test]
-    fn bencode_parse_errors() {
-        let v = Value::bencode_parse(b"123").unwrap_err();
+    fn parse_errors() {
+        let v = Value::parse(b"123").unwrap_err();
         assert_matches!(v, nom::Err::Error(BencodeError::Nom(..)));
 
-        let v = Value::bencode_parse(b"d3:foo3:bar5:hello5:world").unwrap_err();
+        let v = Value::parse(b"d3:foo3:bar5:hello5:world").unwrap_err();
         assert_matches!(v, nom::Err::Error(BencodeError::Nom(..)));
+    }
+
+    #[test]
+    fn test_parse_torrent() {
+        let data = Value::parse(include_bytes!("../test-assets/test.torrent")).unwrap();
+        assert_eq!(data.len(), 1);
+
+        let v = data.first().unwrap();
+        assert_matches!(*v, Value::Dictionary(_));
+
+        if let Value::Dictionary(dict) = v {
+            let info = dict.get(b"info".as_slice()).unwrap();
+            assert_matches!(*info, Value::Dictionary(_));
+            if let Value::Dictionary(info) = info {
+                let v = info.get(b"length".as_slice()).unwrap();
+                assert_matches!(*v, Value::Integer(655360000));
+                let v = info.get(b"name".as_slice()).unwrap();
+                assert_matches!(*v, Value::Bytes(b"debian-mac-12.1.0-amd64-netinst.iso"));
+            }
+
+            let announce = dict.get(b"announce".as_slice()).unwrap();
+            assert_matches!(*announce, Value::Bytes(_));
+
+            if let Value::Bytes(announce) = *announce {
+                let str = std::str::from_utf8(announce).unwrap();
+                assert_eq!(str, "http://bttracker.debian.org:6969/announce");
+            }
+
+            let created_by = dict.get(b"created by".as_slice()).unwrap();
+            assert_matches!(created_by, Value::Bytes(_));
+
+            if let Value::Bytes(created_by) = *created_by {
+                let str = std::str::from_utf8(created_by).unwrap();
+                assert_eq!(str, "mktorrent 1.1");
+            }
+        }
     }
 }
