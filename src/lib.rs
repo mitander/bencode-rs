@@ -94,7 +94,30 @@ impl<'a> Value<'a> {
     }
 
     fn parse_dict(input: &'a [u8]) -> BencodeResult<'a> {
-        !todo!()
+        let (next, value) = preceded(
+            char('d'),
+            many_till(
+                pair(
+                    Self::parse_bytes,
+                    alt((
+                        Self::parse_bytes,
+                        Self::parse_integer,
+                        // Self::parse_list,
+                        Self::parse_dict,
+                    )),
+                ),
+                char('e'),
+            ),
+        )(input)?;
+
+        let data = value.0.into_iter().map(|x| {
+            if let Value::Bytes(key) = x.0 {
+                (key, x.1)
+            } else {
+                unreachable!()
+            }
+        });
+        Ok((next, Value::Dictionary(data.collect())))
     }
 }
 #[cfg(test)]
@@ -175,5 +198,36 @@ mod tests {
 
         let v = Value::parse_bytes(b"0:error").unwrap_err();
         assert_matches!(v, nom::Err::Failure(BencodeError::InvalidBytesLength(_)));
+    }
+
+    #[test]
+    fn parse_dict() {
+        let (_, v) = Value::parse_dict(b"d3:bar4:spam3:fooi42ee").unwrap();
+        assert_matches!(v, Value::Dictionary(_));
+
+        if let Value::Dictionary(dict) = v {
+            let v = dict.get(b"bar".as_slice()).unwrap();
+            assert_matches!(*v, Value::Bytes(b"spam"));
+
+            let v = dict.get(b"foo".as_slice()).unwrap();
+            assert_matches!(*v, Value::Integer(42));
+        }
+
+        // TODO: implement test using lists once parser is implemented
+    }
+
+    #[test]
+    fn parse_dict_errors() {
+        let v = Value::parse_dict(b"123").unwrap_err();
+        assert_matches!(v, nom::Err::Error(BencodeError::Nom(..)));
+
+        let v = Value::parse_dict(b"d123").unwrap_err();
+        assert_matches!(v, nom::Err::Error(BencodeError::Nom(..)));
+
+        let v = Value::parse_dict(b"d3:bar4:spam3:fooi42e").unwrap_err();
+        assert_matches!(v, nom::Err::Error(BencodeError::Nom(..)));
+
+        let v = Value::parse_dict(b"d:bar4:spam3:fooi42e").unwrap_err();
+        assert_matches!(v, nom::Err::Error(BencodeError::Nom(..)));
     }
 }
