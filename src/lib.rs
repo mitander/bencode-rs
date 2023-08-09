@@ -90,7 +90,19 @@ impl<'a> Value<'a> {
     }
 
     fn parse_list(input: &'a [u8]) -> BencodeResult<'a> {
-        !todo!()
+        let (next, item) = preceded(
+            char('l'),
+            many_till(
+                alt((
+                    Self::parse_bytes,
+                    Self::parse_integer,
+                    Self::parse_list,
+                    Self::parse_dict,
+                )),
+                char('e'),
+            ),
+        )(input)?;
+        Ok((next, Value::List(item.0)))
     }
 
     fn parse_dict(input: &'a [u8]) -> BencodeResult<'a> {
@@ -102,7 +114,7 @@ impl<'a> Value<'a> {
                     alt((
                         Self::parse_bytes,
                         Self::parse_integer,
-                        // Self::parse_list,
+                        Self::parse_list,
                         Self::parse_dict,
                     )),
                 ),
@@ -202,7 +214,7 @@ mod tests {
 
     #[test]
     fn parse_dict() {
-        let (_, v) = Value::parse_dict(b"d3:bar4:spam3:fooi42ee").unwrap();
+        let (_, v) = Value::parse_dict(b"d3:bar4:spam3:fooli42eee").unwrap();
         assert_matches!(v, Value::Dictionary(_));
 
         if let Value::Dictionary(dict) = v {
@@ -210,10 +222,14 @@ mod tests {
             assert_matches!(*v, Value::Bytes(b"spam"));
 
             let v = dict.get(b"foo".as_slice()).unwrap();
-            assert_matches!(*v, Value::Integer(42));
-        }
+            assert_matches!(*v, Value::List(_));
 
-        // TODO: implement test using lists once parser is implemented
+            if let Value::List(v) = v {
+                let mut it = v.iter();
+                let x = it.next().unwrap();
+                assert_matches!(*x, Value::Integer(42));
+            }
+        }
     }
 
     #[test]
@@ -228,6 +244,59 @@ mod tests {
         assert_matches!(v, nom::Err::Error(BencodeError::Nom(..)));
 
         let v = Value::parse_dict(b"d:bar4:spam3:fooi42e").unwrap_err();
+        assert_matches!(v, nom::Err::Error(BencodeError::Nom(..)));
+    }
+
+    #[test]
+    fn test_parse_list() {
+        let (_, v) = Value::parse_list(b"l4:spami42eli9ei50eed3:bar4:spameee").unwrap();
+        assert_matches!(v, Value::List(_));
+
+        if let Value::List(list) = v {
+            let mut it = list.iter();
+
+            let x = it.next().unwrap();
+            assert_matches!(*x, Value::Bytes(b"spam"));
+
+            let x = it.next().unwrap();
+            assert_matches!(*x, Value::Integer(42));
+
+            let x = it.next().unwrap();
+            assert_matches!(*x, Value::List(_));
+
+            if let Value::List(list) = x {
+                let mut it = list.iter();
+
+                let x = it.next().unwrap();
+                assert_matches!(*x, Value::Integer(9));
+
+                let x = it.next().unwrap();
+                assert_matches!(*x, Value::Integer(50));
+            }
+
+            let x = it.next().unwrap();
+            assert_matches!(*x, Value::Dictionary(_));
+
+            if let Value::Dictionary(dict) = x {
+                let v = dict.get(b"bar".as_slice()).unwrap();
+                assert_matches!(*v, Value::Bytes(b"spam"));
+            }
+        }
+
+        // empty list should be parsable
+        let (_, v) = Value::parse_list(b"le").unwrap();
+        assert_matches!(v, Value::List(_));
+    }
+
+    #[test]
+    fn test_parse_list_errors() {
+        let v = Value::parse_list(b"123").unwrap_err();
+        assert_matches!(v, nom::Err::Error(BencodeError::Nom(..)));
+
+        let v = Value::parse_list(b"l123").unwrap_err();
+        assert_matches!(v, nom::Err::Error(BencodeError::Nom(..)));
+
+        let v = Value::parse_list(b"li1e").unwrap_err();
         assert_matches!(v, nom::Err::Error(BencodeError::Nom(..)));
     }
 }
